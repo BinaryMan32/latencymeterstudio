@@ -1,6 +1,7 @@
 package com.elena.latencymeter;
 
 import android.annotation.SuppressLint;
+import android.annotation.TargetApi;
 import android.app.Activity;
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -16,12 +17,16 @@ import android.graphics.PathMeasure;
 import android.graphics.Point;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.os.SystemClock;
 import android.util.AttributeSet;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.MotionEvent;
-import android.view.View;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.TextView;
@@ -31,6 +36,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.lang.annotation.Target;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -38,7 +44,7 @@ import java.util.List;
 import static android.content.SharedPreferences.Editor;
 
 @SuppressLint({ "DrawAllocation", "ClickableViewAccessibility" })
-public class AnimationView extends View {
+public class AnimationView extends SurfaceView {
 
 	public static final String TAG = "LatencyMeter";
 	Paint paint, paintText, paintTouch, paintStat, autoPaint, paintAxis, paintPoint;
@@ -151,6 +157,58 @@ public class AnimationView extends View {
     private int statsTextColorPrev = Color.TRANSPARENT;
     private static final int STATS_COLOR1 = Color.parseColor("#008000");
     private static final int STATS_COLOR2 = Color.parseColor("#FFA500");
+
+    Drawable backgroundDrawable;
+
+    static class MyThread extends Thread {
+        private AnimationView view;
+        private boolean running = false;
+
+        public MyThread(AnimationView view) {
+            this.view = view;
+        }
+
+        public void setRunning(boolean run) {
+            running = run;
+        }
+
+        @Override
+        @TargetApi(Build.VERSION_CODES.M)
+        public void run() {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+                view.backgroundDrawable = view.getRootView().getBackground();
+            else
+                view.backgroundDrawable = new ColorDrawable(Color.RED);
+
+            while (running) {
+                Canvas canvas = null;
+                SurfaceHolder holder = view.getHolder();
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+                        canvas = holder.getSurface().lockHardwareCanvas();
+                    else
+                        canvas = holder.lockCanvas();
+
+                    if (canvas != null) {
+                        synchronized (holder) {
+                            view.surfaceDraw(canvas);
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "MyThread.run Error", e);
+                } finally {
+                    if (canvas != null) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+                            holder.getSurface().unlockCanvasAndPost(canvas);
+                        else
+                            holder.unlockCanvasAndPost(canvas);
+                    }
+                }
+            }
+        }
+    }
+
+    MyThread myThread;
 
 	public AnimationView(Context context) {
 		super(context);
@@ -285,6 +343,34 @@ public class AnimationView extends View {
         tvMed_w = (TextView) this.getRootView().findViewById(R.id.textViewMed_w);
         tvMax_w = (TextView) this.getRootView().findViewById(R.id.textViewMax_w);
         tvStd_w = (TextView) this.getRootView().findViewById(R.id.textViewStd_w);
+
+        myThread = new MyThread(this);
+        getHolder().addCallback(new SurfaceHolder.Callback() {
+
+            @Override
+            public void surfaceDestroyed(SurfaceHolder holder) {
+                boolean retry = true;
+                myThread.setRunning(false);
+                while (retry) {
+                    try {
+                        myThread.join();
+                        retry = false;
+                    } catch (InterruptedException e) {
+                    }
+                }
+            }
+
+            @Override
+            public void surfaceCreated(SurfaceHolder holder) {
+                myThread.setRunning(true);
+                myThread.start();
+            }
+
+            @Override
+            public void surfaceChanged(SurfaceHolder holder, int format,
+                                       int width, int height) {
+            }
+        });
     }
 
     void setStatsTextColor(int color) {
@@ -351,14 +437,13 @@ public class AnimationView extends View {
         }
     }
 
-	@SuppressLint("NewApi")
-    @Override
-	protected void onDraw(Canvas canvas) {
+	protected void surfaceDraw(Canvas canvas) {
 
         //Log.d(TAG, "multiplier and samples: " + multiplier + "..." + samples);
+        backgroundDrawable.draw(canvas);
 
         if (showChart) {
-            restart.setVisibility(VISIBLE);
+            //restart.setVisibility(VISIBLE);
             recalcStats();
             paintAxis.setColor(Color.BLACK);
             paintAxis.setStrokeWidth(3);
@@ -451,6 +536,7 @@ public class AnimationView extends View {
             }
 
             ///////////////////////////
+            /*
             if (eventRatePrev != eventRate) {
                 if (eventRate == 0) {
                     tvEvRate.setText("event rate: --");
@@ -460,9 +546,10 @@ public class AnimationView extends View {
                 }
                 eventRatePrev = eventRate;
             }
+            */
 
             if (averageOutputLatency > 0) {
-                tvOut.setText(String.format("%.2f", averageOutputLatency) + " ms");
+                //tvOut.setText(String.format("%.2f", averageOutputLatency) + " ms");
                 //tvOut.setTextColor(Color.parseColor("#008000"));
                 //tvOut.setTypeface(Typeface.DEFAULT);
                 //tvOut_w.setTextColor(Color.parseColor("#008000"));
@@ -471,15 +558,18 @@ public class AnimationView extends View {
             }
 
             if (averageLatency > 0) {
+                /*
                 tvTotal.setTypeface(Typeface.DEFAULT_BOLD);
                 tvTotal_w.setTypeface(Typeface.DEFAULT_BOLD);
                 tvIC.setText(String.format("%.2f", averageLatency
                         - averageOutputLatency - averageDispatchLatency) + " ms");
                 tvTotal.setText(String.format("%.2f", averageLatency)
                         + " ms");
+                        */
                 showChart = true;
             }
 
+            /*
             tvMin.setText(String.format("%.2f", minL) + " ms");
             tvMax.setText(String.format("%.2f", maxL) + " ms");
             tvMed.setText(String.format("%.2f", median) + " ms");
@@ -490,6 +580,7 @@ public class AnimationView extends View {
             } else {
                 tvDisp.setText(String.format("%.2f", averageDispatchLatency) + " ms");
             }
+            */
             //////////////////////////
 
         } else {
@@ -687,8 +778,8 @@ public class AnimationView extends View {
             } else {
                 statsColor = STATS_COLOR2;
             }
+            /*
             setStatsTextColor(statsColor);
-
             if (eventRatePrev != eventRate) {
                 if (eventRate == 0) {
                     tvEvRate.setText("event rate: --");
@@ -698,6 +789,7 @@ public class AnimationView extends View {
                 }
                 eventRatePrev = eventRate;
             }
+            */
 
             if (touchActive && myLatency.size() < samples && isAutoDone) {
                 paintText.setColor(STATS_COLOR2);
@@ -714,8 +806,6 @@ public class AnimationView extends View {
 
             ballAngle += ballDir * speed / currFps;
         }
-
-		invalidate();
 	}
 
 	@Override
